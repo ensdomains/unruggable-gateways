@@ -5,7 +5,7 @@ import { describe } from '../../bun-describe-fix.js';
 import { afterAll, expect, test } from 'bun:test';
 import { namehash } from 'ethers/hash';
 import { serve } from '@namestone/ezccip/serve';
-import { createProvider, providerURL } from '../../providers.js';
+import { providerURL } from '../../providers.js';
 import { CHAINS } from '../../../src/chains.js';
 import { GatewayProgram } from '../../../src/vm.js';
 import { hexlify } from 'ethers/utils';
@@ -16,7 +16,7 @@ describe('PublicResolver', async () => {
     infoLog: true,
   });
   afterAll(foundry.shutdown);
-  const rollup = new EthSelfRollup(createProvider(CHAINS.MAINNET));
+  const rollup = new EthSelfRollup(foundry.provider);
   const gateway = new Gateway(rollup);
   const ccip = await serve(gateway, { protocol: 'raw', log: false });
   afterAll(ccip.shutdown);
@@ -49,7 +49,7 @@ describe('PublicResolver', async () => {
     .follow() // addresses[version][node][coinType]
     .readBytes()
     .setOutput(1);
-  console.log(hexlify(publicResolverV3.encode()));
+  console.log({ bytecode: hexlify(publicResolverV3.encode()) });
 
   // await foundry.confirm(
   //   resolver.setResolverProgram(
@@ -66,7 +66,7 @@ describe('PublicResolver', async () => {
         publicResolverV3.encode(),
         { enableCcipRead: true }
       )
-    ).resolves.toStrictEqual([
+    ).resolves.toEqual([
       '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63', // PublicResolverV3
       '0xd8da6bf26964af9d7eed9e03e53415d37aa96045', // vitalik.eth addr(60)
     ]);
