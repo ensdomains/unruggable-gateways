@@ -3,18 +3,20 @@ import { EthSelfRollup } from '../../../src/eth/EthSelfRollup.js';
 import { Gateway } from '../../../src/gateway.js';
 import { describe } from '../../bun-describe-fix.js';
 import { afterAll, expect, test } from 'bun:test';
-import { id as keccakStr } from 'ethers/hash';
-import { EnsResolver } from 'ethers/providers';
+import { namehash } from 'ethers/hash';
 import { serve } from '@namestone/ezccip/serve';
-import { LATEST_BLOCK_TAG } from '../../../src/utils.js';
+import { createProvider, providerURL } from '../../providers.js';
+import { CHAINS } from '../../../src/chains.js';
+import { GatewayProgram } from '../../../src/vm.js';
+import { hexlify } from 'ethers/utils';
 
-describe('ens', async () => {
+describe('PublicResolver', async () => {
   const foundry = await Foundry.launch({
-    infoLog: false,
+    fork: providerURL(CHAINS.MAINNET),
+    infoLog: true,
   });
   afterAll(foundry.shutdown);
-  const rollup = new EthSelfRollup(foundry.provider);
-  rollup.latestBlockTag = LATEST_BLOCK_TAG;
+  const rollup = new EthSelfRollup(createProvider(CHAINS.MAINNET));
   const gateway = new Gateway(rollup);
   const ccip = await serve(gateway, { protocol: 'raw', log: false });
   afterAll(ccip.shutdown);
@@ -28,49 +30,45 @@ describe('ens', async () => {
     libs: { GatewayVM },
   });
 
-  // setup storage contract (L2)
-  const L2Storage = await foundry.deploy({ file: 'L2Storage' });
-
-  const avatar = 'https://raffy.antistupid.com/ens.jpg';
-  const address = '0x51050ec063d393217B436747617aD1C2285Aeeee';
-  const contenthash = '0xe30101701202dead';
-  const node = keccakStr('raffy');
-  const BASE = 0x8000000 + 8453;
-
-  await foundry.confirm(L2Storage.setText(node, 'avatar', avatar));
-  await foundry.confirm(L2Storage.setAddr(node, 60, address));
-  await foundry.confirm(L2Storage.setAddr(node, BASE, address));
-  await foundry.confirm(L2Storage.setContenthash(node, contenthash));
-
-  // setup resolver contract (L1)
-  const L1Resolver = await foundry.deploy({
-    file: 'L1Resolver',
-    args: [verifier, L2Storage],
+  // create verified ENS contract
+  const resolver = await foundry.deploy({
+    file: 'VerifiedENS',
+    args: [verifier],
   });
 
-  function getResolver(name: string) {
-    return new EnsResolver(foundry.provider, L1Resolver.target, name);
-  }
+  // create program
+  const publicResolverV3 = new GatewayProgram()
+    .setSlot(0) // recordVersions
+    .pushStack(0) // node
+    .follow() // recordVersions[node]
+    .read() // version, leave on stack at offset 1
+    .setSlot(2) // addresses
+    .follow() // slot
+    .follow() // node
+    .push(60) // coinType
+    .follow() // addresses[version][node][coinType]
+    .readBytes()
+    .setOutput(1);
+  console.log(hexlify(publicResolverV3.encode()));
 
-  test('avatar', async () => {
-    expect(await getResolver('raffy.chonk').getAvatar(), avatar);
-  });
-  test('addr(eth)', async () => {
-    expect(await getResolver('raffy.chonk').getAddress(), address);
-  });
-  test('addr(base)', async () => {
-    expect(await getResolver('raffy.chonk').getAddress(BASE), address);
-  });
-  test('contenthash', async () => {
-    expect(await getResolver('raffy.chonk').getContentHash(), contenthash);
-  });
-  test('unset text', async () => {
-    expect(await getResolver('raffy.chonk').getText('chonk'), '');
-  });
-  test('unset addr', async () => {
-    expect(await getResolver('raffy.chonk').getAddress(0x80000000), '0x');
-  });
-  test('unknown name', async () => {
-    expect(await getResolver('_dne123').getAddress(), '0x');
+  // await foundry.confirm(
+  //   resolver.setResolverProgram(
+  //     '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63',
+  //     publicResolverV3.encode()
+  //   )
+  // );
+
+  // https://adraffy.github.io/ens-normalize.js/test/resolver.html#vitalik.eth
+  test('vitalik.eth', async () => {
+    expect(
+      resolver.resolveWithProgram(
+        namehash('vitalik.eth'),
+        publicResolverV3.encode(),
+        { enableCcipRead: true }
+      )
+    ).resolves.toStrictEqual([
+      '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63', // PublicResolverV3
+      '0xd8da6bf26964af9d7eed9e03e53415d37aa96045', // vitalik.eth addr(60)
+    ]);
   });
 });

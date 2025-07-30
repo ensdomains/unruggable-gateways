@@ -94,6 +94,7 @@ const chain2 = chainFromName(process.env.C ?? '');
 const useLocalGateway = !!process.env.G;
 const useLocalVerifier = !!process.env.V;
 const finalizationHours = parseInt(process.env.H ?? '') || 6;
+const printCalls = !!process.env.P;
 
 const setup = SETUPS.find((x) => x.config.chain2 === chain2);
 if (!setup) throw new Error('unsupported chain');
@@ -282,15 +283,17 @@ async function determineGateway(foundry: Foundry, setup: Setup) {
     gatewayURL = `https://lb.drpc.org/gateway/unruggable?network=${drpc}`;
   }
 
-  // [gateway.rollup.provider1, gateway.rollup.provider2].forEach((p) => {
-  //   p.on('debug', (x) => {
-  //     if (x.action === 'sendRpcPayload') {
-  //       console.log(p._network.chainId, x.action, x.payload);
-  //     } else if (x.action == 'receiveRpcResult') {
-  //       console.log(p._network.chainId, x.action, x.result);
-  //     }
-  //   });
-  // });
+  if (printCalls) {
+    [gateway.rollup.provider1, gateway.rollup.provider2].forEach((p) => {
+      p.on('debug', (x) => {
+        if (x.action === 'sendRpcPayload') {
+          console.log(p._network.chainId, x.action, x.payload);
+        } else if (x.action == 'receiveRpcResult') {
+          console.log(p._network.chainId, x.action, x.result);
+        }
+      });
+    });
+  }
 
   return { gatewayURL, verifierAddress };
 }

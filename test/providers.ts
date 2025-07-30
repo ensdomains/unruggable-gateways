@@ -17,6 +17,7 @@ export type RPCInfo = {
   readonly alchemyPremium?: boolean;
   readonly drpc?: string;
   readonly drpcBeacon?: string;
+  readonly coinbase?: string;
 };
 
 // TODO: this list is incomplete!
@@ -82,6 +83,7 @@ export const RPC_INFO = new Map<Chain, RPCInfo>(
         //infura: 'base-mainnet', // 20250214: eth_getProof depth is still insufficient
         alchemy: 'base-mainnet', // 20250107 eth_getProof depth now seems OK
         drpc: 'base', // 20250115: no eth_getProof
+        //coinbase: 'base', // 20250729: no eth_getProof
       },
       {
         // https://docs.base.org/docs/network-information#base-testnet-sepolia
@@ -91,6 +93,7 @@ export const RPC_INFO = new Map<Chain, RPCInfo>(
         infura: 'base-sepolia',
         alchemy: 'base-sepolia', // 20250107 eth_getProof depth now seems OK
         drpc: 'base-sepolia', // 20250115: no eth_getProof
+        // coinbase: 'base-sepolia', // 20250729: no eth_getProof
       },
       {
         // https://docs.arbitrum.io/build-decentralized-apps/reference/node-providers#arbitrum-public-rpc-endpoints
@@ -563,6 +566,18 @@ export function decideProvider(chain: Chain, order?: string[]): ProviderInfo {
             type,
             slug,
             url: `https://lb.drpc.org/ogrpc?network=${slug}&dkey=${apiKey}`,
+            apiKey,
+          };
+        }
+        break;
+      }
+      case 'coinbase': {
+        if ((slug = info.coinbase) && (apiKey = process.env.COINBASE_KEY)) {
+          return {
+            info,
+            type,
+            slug,
+            url: `https://api.developer.coinbase.com/rpc/v1/${slug}/${apiKey}`,
             apiKey,
           };
         }
