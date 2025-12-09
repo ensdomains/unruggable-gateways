@@ -76,7 +76,9 @@ const args = process.argv.slice(2).filter((x) => {
   } else if (x === '--latest') {
     // RPC calls will utilize the 'latest' block tag. Default is 'finalized'
     latestBlockTag = LATEST_BLOCK_TAG;
-  } else if ((match = x.match(/^--blockTag\=(-?(?:0x)?\d+)$/))) {
+  } else if (
+    (match = x.match(/^--blockTag=(-?(?:0x)?\d+|latest|finalized|safe)$/i))
+  ) {
     latestBlockTag = BigInt(match[1]);
   } else if ((match = x.match(/^--unfinalized(|=\d+)$/))) {
     // Chain specific configuration value to indicate what unfinalized state is acceptable
