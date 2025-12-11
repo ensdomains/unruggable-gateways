@@ -49,7 +49,8 @@ export class CallbackError extends Error {
   }
 }
 
-type HexFuture = Unwrappable<Unwrappable<number, number>, HexString>;
+type SizeFuture = Unwrappable<number, number>;
+type HexFuture = Unwrappable<SizeFuture, HexString>;
 
 async function peekSize(value: HexFuture) {
   if (value instanceof Wrapped) {
@@ -402,6 +403,7 @@ export class GatewayRequest extends GatewayProgram {
   }
 }
 
+type PendingSlotsNeed = bigint[];
 export type TargetNeed = { target: HexAddress; required: boolean };
 export type HashedNeed = {
   hash: HexFuture;
@@ -438,7 +440,8 @@ export class GatewayTrace {
       prover.requireTargetBeforeSlot
     );
   }
-  readonly needs: (Need | Need[])[] = [];
+  readonly needs: (Need | PendingSlotsNeed)[] = [];
+  readonly sizes: SizeFuture[] = [];
   readonly targets = new Map<HexString, TargetNeed>();
   proofBudget: number;
   allocBudget: number;
@@ -686,6 +689,7 @@ export abstract class AbstractProver {
       GatewayTrace.from(this)
     );
     await this.eval(reader, vm, 0);
+    await Promise.all(vm.trace.sizes.map(unwrap));
     return vm;
   }
   private async eval(
@@ -793,12 +797,11 @@ export abstract class AbstractProver {
         case OP.READ_BYTES: {
           const { target, slot } = vm;
           vm.trace.addSlots(target, [slot]);
-          const temp: Need[] = [];
-          vm.trace.needs.push(temp);
+          const slots: PendingSlotsNeed = [];
+          vm.trace.needs.push(slots);
           let value: HexString | undefined;
-          //let fast = false; // if we peekSize(), we can use fast
           const futureSize = new Wrapped(32, async () => {
-            const first = await this.getStorage(target, slot); //, fast);
+            const first = await this.getStorage(target, slot);
             let size = parseInt(first.slice(64), 16); // last byte
             if ((size & 1) == 0) {
               // small
@@ -808,21 +811,22 @@ export abstract class AbstractProver {
             }
             size = checkSize(
               BigInt(first) >> 1n,
-              vm.trace.remainingProvableBytes
+              this.fast
+                ? this.maxSuppliedBytes
+                : vm.trace.remainingProvableBytes
             );
             if (size < 32) {
               throw new Error(`invalid storage encoding: ${target} @ ${slot}`);
             }
-            vm.trace.consumeProofs((size + 31) >> 5);
+            slots.push(...solidityArraySlots(slot, (size + 31) >> 5)); // inject
+            vm.trace.consumeProofs(slots.length);
             return size;
           });
+          vm.trace.sizes.push(futureSize);
           vm.push(
             new Wrapped(futureSize, async () => {
-              //fast = false;
               const size = await unwrap(futureSize);
               if (value) return value;
-              const slots = solidityArraySlots(slot, (size + 31) >> 5);
-              temp.push(...slots);
               const v = await Promise.all(
                 slots.map((x) => this.getStorage(target, x))
               );
