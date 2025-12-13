@@ -77,7 +77,7 @@ function uint256FromHex(hex: HexString) {
 }
 function numberFromHex(hex: HexString) {
   const u = uint256FromHex(hex);
-  if (u > 0xffffff) throw new Error('numeric overflow');
+  if (u > 0x1fffffff) throw new Error('numeric overflow');
   return Number(u);
 }
 function addressFromHex(hex: HexString) {
@@ -93,6 +93,14 @@ function addressFromHex(hex: HexString) {
 }
 function bigintRange(start: bigint, length: number) {
   return Array.from({ length }, (_, i) => start + BigInt(i));
+}
+function solidityArraySlotCount(length: number, step: number) {
+  if (step < 32) {
+    const per = (32 / step) | 0;
+    return ((length + per - 1) / per) | 0;
+  } else {
+    return length * ((step + 31) >> 5);
+  }
 }
 export function solidityArraySlots(slot: BigNumberish, length: number) {
   return length
@@ -441,7 +449,7 @@ export class GatewayTrace {
     );
   }
   readonly needs: (Need | PendingSlotsNeed)[] = [];
-  readonly sizes: SizeFuture[] = [];
+  readonly futures: SizeFuture[] = [];
   readonly targets = new Map<HexString, TargetNeed>();
   proofBudget: number;
   allocBudget: number;
@@ -689,7 +697,8 @@ export abstract class AbstractProver {
       GatewayTrace.from(this)
     );
     await this.eval(reader, vm, 0);
-    await Promise.all(vm.trace.sizes.map(unwrap));
+    await Promise.all(vm.trace.futures.map(unwrap)); // expand all sizes
+    // vm.trace.sizes.length = 0;
     return vm;
   }
   private async eval(
@@ -799,38 +808,23 @@ export abstract class AbstractProver {
           vm.trace.addSlots(target, [slot]);
           const slots: PendingSlotsNeed = [];
           vm.trace.needs.push(slots);
-          let value: HexString | undefined;
-          const futureSize = new Wrapped(32, async () => {
-            const first = await this.getStorage(target, slot);
-            let size = parseInt(first.slice(64), 16); // last byte
-            if ((size & 1) == 0) {
-              // small
-              size >>= 1;
-              value = dataSlice(first, 0, size); // will throw if size is invalid
-              return size;
-            }
-            size = checkSize(
-              BigInt(first) >> 1n,
-              this.fast
-                ? this.maxSuppliedBytes
-                : vm.trace.remainingProvableBytes
+          let value: HexFuture;
+          const future = new Wrapped(32, async () => {
+            const res = await this.getStorageBytes(
+              target,
+              slot,
+              vm.trace.remainingProvableBytes
             );
-            if (size < 32) {
-              throw new Error(`invalid storage encoding: ${target} @ ${slot}`);
-            }
-            slots.push(...solidityArraySlots(slot, (size + 31) >> 5)); // inject
+            value = res.value;
+            slots.push(...res.slots); // inject
             vm.trace.consumeProofs(slots.length);
-            return size;
+            return res.size;
           });
-          vm.trace.sizes.push(futureSize);
+          vm.trace.futures.push(future);
           vm.push(
-            new Wrapped(futureSize, async () => {
-              const size = await unwrap(futureSize);
-              if (value) return value;
-              const v = await Promise.all(
-                slots.map((x) => this.getStorage(target, x))
-              );
-              return dataSlice(concat(v), 0, size);
+            new Wrapped(future, async () => {
+              await unwrap(future);
+              return unwrap(value);
             })
           );
           continue;
@@ -847,26 +841,32 @@ export abstract class AbstractProver {
           const step = await vm.popNumber();
           if (!step) throw new Error('invalid element size');
           const { target, slot } = vm;
-          let length = checkSize(
-            uint256FromHex(await this.getStorage(target, slot)),
-            vm.trace.remainingProvableBytes
-          );
-          if (step < 32) {
-            const per = (32 / step) | 0;
-            length = ((length + per - 1) / per) | 0;
-          } else {
-            length = length * ((step + 31) >> 5);
-          }
-          const size = checkSize(length << 5, vm.trace.remainingProvableBytes);
-          const slots = solidityArraySlots(slot, length);
-          slots.unshift(slot);
-          vm.trace.addSlots(target, slots);
+          vm.trace.addSlots(target, [slot]);
+          const slots: PendingSlotsNeed = [];
+          vm.trace.needs.push(slots);
+          const future = new Wrapped(32, async () => {
+            const slotCount = solidityArraySlotCount(
+              numberFromHex(await this.getStorage(target, slot)),
+              step
+            );
+            const size = checkSize(
+              slotCount << 5,
+              vm.trace.remainingProvableBytes
+            );
+            slots.push(...solidityArraySlots(slot, slotCount));
+            vm.trace.consumeProofs(slotCount);
+            return size;
+          });
+          vm.trace.futures.push(future);
           vm.push(
-            new Wrapped(size, async () =>
-              concat(
-                await Promise.all(slots.map((x) => this.getStorage(target, x)))
-              )
-            )
+            new Wrapped(future, async () => {
+              await unwrap(future);
+              return concat(
+                await Promise.all(
+                  [slot, ...slots].map((x) => this.getStorage(target, x))
+                )
+              );
+            })
           );
           continue;
         }
@@ -1060,21 +1060,25 @@ export abstract class AbstractProver {
             this.readBytesAtSupported.set(target, false);
         }
       }
-      const { value } = await this.getStorageBytes(target, slot);
+      const { value } = await this.getStorageBytes(
+        target,
+        slot,
+        this.maxSuppliedBytes
+      );
       return unwrap(value);
     });
   }
   async getStorageBytes(
     target: HexAddress,
     slot: bigint,
-    limit?: number
+    limit: number,
+    fast?: boolean
   ): Promise<{
     value: HexFuture;
     size: number;
     slots: bigint[]; // note: does not include header slot!
   }> {
     // https://docs.soliditylang.org/en/latest/internals/layout_in_storage.html#bytes-and-string
-    const fast = !limit;
     const first = await this.getStorage(target, slot, fast);
     let size = parseInt(first.slice(64), 16); // last byte
     if ((size & 1) == 0) {
@@ -1083,7 +1087,7 @@ export abstract class AbstractProver {
       const value = dataSlice(first, 0, size); // will throw if size is invalid
       return { value, size, slots: [] };
     }
-    size = checkSize(BigInt(first) >> 1n, fast ? this.maxSuppliedBytes : limit);
+    size = checkSize(BigInt(first) >> 1n, limit);
     if (size < 32) {
       throw new Error(`invalid storage encoding: ${target} @ ${slot}`);
     }
