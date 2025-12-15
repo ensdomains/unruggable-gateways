@@ -1,12 +1,11 @@
+import type { HexString, ProofSequence } from './types.js';
+import { solidityPackedKeccak256 } from 'ethers/hash';
+import { getBytes } from 'ethers/utils';
 import { EZCCIP } from '@namestone/ezccip';
-
 import { GATEWAY_ABI } from './gateway.js';
 import { CachedValue, LRU } from './cached.js';
-import { solidityPackedKeccak256 } from 'ethers/hash';
 import { AbstractProver, CallbackError } from './vm.js';
-import { getBytes } from 'ethers/utils';
 import { toUnpaddedHex } from './utils.js';
-import { HexString, ProofSequence } from './types.js';
 
 type SlaveCommit = {
   index: bigint;

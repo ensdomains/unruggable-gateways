@@ -1,10 +1,13 @@
 import type { Serve } from 'bun';
-import { OPFaultRollup } from '../src/op/OPFaultRollup.js';
-import { SlaveGateway } from '../src/slave.js';
-import { flattenErrors, toUnpaddedHex } from '../src/utils.js';
+import type { HexAddress, HexString } from '../src/types.js';
 import { parseArgs } from 'node:util';
+import { OPFaultRollup } from '../src/op/OPFaultRollup.js';
+import { SlaveGateway } from '../src/gateway-slave.js';
+import { flattenErrors, toUnpaddedHex } from '../src/utils.js';
 import { EthProver } from '../src/eth/EthProver.js';
+import { RPCEthGetBlock, RPCEthGetProof } from '../src/eth/types.js';
 import {
+  type MaybeNode,
   findLeaf,
   followSlot,
   getProof,
@@ -12,15 +15,11 @@ import {
   insertBytes,
   insertNode,
   keccak256,
-  MaybeNode,
   toBytes,
   toHex,
   toNibblePath,
   trimLeadingZeros,
 } from '../../merkle-builder/src/index.js';
-import { RPCEthGetBlock, RPCEthGetProof } from '../src/eth/types.js';
-import { HexString } from '@namestone/ezccip';
-import { HexAddress } from '../src/types.js';
 
 const args = parseArgs({
   allowPositionals: true,
