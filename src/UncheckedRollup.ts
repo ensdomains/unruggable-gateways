@@ -10,6 +10,7 @@ import { AbstractRollup, align, type RollupCommit } from './rollup.js';
 import {
   ABI_CODER,
   fetchBlock,
+  fetchCode,
   fetchStorage,
   LATEST_BLOCK_TAG,
 } from './utils.js';
@@ -20,7 +21,7 @@ export class UncheckedProver extends BlockProver {
   override isContract(target: HexAddress): Promise<boolean> {
     target = target.toLowerCase();
     return this.cache.get(target, async (a) => {
-      const code = await this.provider.getCode(a, this.block);
+      const code = await fetchCode(this.provider, a, this.block);
       return code.length > 2;
     });
   }

@@ -11,6 +11,10 @@ import type { AbstractProver } from './vm.js';
 
 export type RollupDeployment<Config> = Readonly<ChainPair & Config>;
 
+export function isRollupDeployment<C>(x: unknown): x is RollupDeployment<C> {
+  return !!x && typeof x === 'object' && 'chain1' in x && 'chain2' in x;
+}
+
 export type RollupCommit<P extends AbstractProver> = {
   readonly index: bigint;
   readonly prover: P;

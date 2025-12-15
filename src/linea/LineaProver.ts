@@ -6,6 +6,7 @@ import {
   toPaddedHex,
   isRPCError,
   fetchStorage,
+  fetchCode,
 } from '../utils.js';
 import {
   type LineaProof,
@@ -45,7 +46,7 @@ export class LineaProver extends BlockProver {
   override async isContract(target: HexString): Promise<boolean> {
     if (this.fast) {
       return this.cache.get(target, async () => {
-        const code = await this.provider.getCode(target, this.block);
+        const code = await fetchCode(this.provider, target, this.block);
         return code.length > 2;
       });
     }
