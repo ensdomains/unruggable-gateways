@@ -152,18 +152,6 @@ export class Gateway<R extends Rollup> extends EZCCIP {
       `too old: ${index} vs ${latest.commit.index}[depth=${this.commitDepth}]`
     );
   }
-  async getRecentCommits(
-    depth = this.commitDepth
-  ): Promise<RollupCommitType<R>[]> {
-    const commits: RollupCommitType<R>[] = [];
-    let cache = await this._updateLatest();
-    commits.push(cache.commit);
-    while (commits.length <= depth) {
-      cache = await this.cachedCommit(await cache.parent.get());
-      commits.push(cache.commit);
-    }
-    return commits;
-  }
   private async cachedCommit(
     index: bigint,
     cacheMs?: number

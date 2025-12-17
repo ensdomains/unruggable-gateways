@@ -39,28 +39,10 @@ export type AbstractOPCommit = RollupCommit<EthProver> & {
   readonly passerRoot: HexString;
 };
 
-function encodeWitness<C extends AbstractOPCommit>(
-  commit: C,
-  proofSeq: ProofSequence
-) {
-  return ABI_CODER.encode(
-    [`(uint256, ${OutputRootProofType}, bytes[], bytes)`],
-    [
-      [
-        commit.index,
-        outputRootProofTuple(commit),
-        proofSeq.proofs,
-        proofSeq.order,
-      ],
-    ]
-  );
-}
-
 export abstract class AbstractOPRollup<C extends AbstractOPCommit>
   extends AbstractRollup<C>
   implements RollupWitnessV1<C>
 {
-  static readonly encodeWitness = encodeWitness;
   L2ToL1MessagePasser = '0x4200000000000000000000000000000000000016';
   async createCommit(
     index: bigint,
@@ -80,7 +62,17 @@ export abstract class AbstractOPRollup<C extends AbstractOPCommit>
     };
   }
   override encodeWitness(commit: C, proofSeq: ProofSequence) {
-    return encodeWitness(commit, proofSeq);
+    return ABI_CODER.encode(
+      [`(uint256, ${OutputRootProofType}, bytes[], bytes)`],
+      [
+        [
+          commit.index,
+          outputRootProofTuple(commit),
+          proofSeq.proofs,
+          proofSeq.order,
+        ],
+      ]
+    );
   }
   encodeWitnessV1(commit: C, proofSeq: ProofSequenceV1) {
     return ABI_CODER.encode(
