@@ -183,6 +183,18 @@ export class Gateway<R extends Rollup> extends EZCCIP {
     this.commitCacheMap.cacheMs = 0;
     this.callLRU.max = 0;
   }
+  async getRecentCommits(
+    depth = this.commitDepth
+  ): Promise<RollupCommitType<R>[]> {
+    const commits: RollupCommitType<R>[] = [];
+    let cache = await this._updateLatest();
+    commits.push(cache.commit);
+    while (commits.length <= depth) {
+      cache = await this.cachedCommit(await cache.parent.get());
+      commits.push(cache.commit);
+    }
+    return commits;
+  }
 }
 
 export abstract class GatewayV1<R extends Rollup> extends EZCCIP {
