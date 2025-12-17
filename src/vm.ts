@@ -7,10 +7,9 @@ import type {
   ProofRef,
   ProofSequence,
   ProofSequenceV1,
-  Provider,
+  RawProvider,
 } from './types.js';
 import { ZeroAddress } from 'ethers/constants';
-import { Contract } from 'ethers/contract';
 import { Interface } from 'ethers/abi';
 import { keccak256 } from 'ethers/crypto';
 import { solidityPackedKeccak256 } from 'ethers/hash';
@@ -29,6 +28,7 @@ import {
   toUnpaddedHex,
   toPaddedHex,
   LATEST_BLOCK_TAG,
+  staticCall,
 } from './utils.js';
 import { CachedMap, LRU } from './cached.js';
 import { GATEWAY_OP as OP } from './ops.js';
@@ -618,7 +618,7 @@ export abstract class AbstractProver {
   // console.log OP_DEBUG statements
   printDebug = true;
 
-  constructor(readonly provider: Provider) {}
+  constructor(readonly provider: RawProvider) {}
 
   abstract get context(): Record<string, any>;
 
@@ -1051,8 +1051,13 @@ export abstract class AbstractProver {
       const can = this.readBytesAtSupported.get(target);
       if (can !== false) {
         try {
-          const contract = new Contract(target, GATEWAY_EXT_ABI, this.provider);
-          const v = await contract.readBytesAt(slot);
+          const v = await staticCall<HexString>(
+            this.provider,
+            target,
+            GATEWAY_EXT_ABI,
+            'readBytesAt',
+            [slot]
+          );
           if (!can) this.readBytesAtSupported.set(target, true);
           return v;
         } catch (err) {
@@ -1103,7 +1108,7 @@ export abstract class AbstractProver {
 }
 
 export interface LatestProverFactory<P extends AbstractProver> {
-  latest(provider: Provider, relative?: BigNumberish): Promise<P>;
+  latest(provider: RawProvider, relative?: BigNumberish): Promise<P>;
 }
 
 export abstract class BlockProver extends AbstractProver {
@@ -1111,14 +1116,14 @@ export abstract class BlockProver extends AbstractProver {
     this: new (...a: ConstructorParameters<typeof BlockProver>) => P
   ) {
     return async (
-      provider: Provider,
+      provider: RawProvider,
       relBlockTag: BigNumberish = LATEST_BLOCK_TAG
     ) => {
       return new this(provider, await fetchBlockNumber(provider, relBlockTag));
     };
   }
   readonly block: HexString;
-  constructor(provider: Provider, block: BigNumberish) {
+  constructor(provider: RawProvider, block: BigNumberish) {
     super(provider);
     this.block = toUnpaddedHex(block);
   }

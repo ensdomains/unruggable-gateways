@@ -9,7 +9,12 @@ import {
 } from './types.js';
 import { BlockProver, makeStorageKey, type TargetNeed } from '../vm.js';
 import { ZeroHash } from 'ethers/constants';
-import { withResolvers, toPaddedHex, fetchStorage } from '../utils.js';
+import {
+  withResolvers,
+  toPaddedHex,
+  fetchStorage,
+  fetchCode,
+} from '../utils.js';
 
 export class EthProver extends BlockProver {
   static readonly EMPTY_STORAGE_HASH = EMPTY_STORAGE_HASH;
@@ -22,7 +27,7 @@ export class EthProver extends BlockProver {
       return this.cache.get(target, async (a) => {
         // note: this actually reverts when the block is bad
         // eg. {"code": -32602, "message": "Unknown block number"}
-        const code = await this.provider.getCode(a, this.block);
+        const code = await fetchCode(this.provider, a, this.block);
         return code.length > 2;
       });
     }

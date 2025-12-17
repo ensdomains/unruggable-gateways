@@ -9,6 +9,7 @@ export type EncodedProof = HexString;
 export type ProofRef = { id: number; proof: EncodedProof };
 
 export type Provider = JsonRpcApiProvider;
+export type RawProvider = Pick<Provider, 'send'>;
 export type ProviderPair = {
   provider1: Provider;
   provider2: Provider;
