@@ -46,6 +46,7 @@ export class CachedValue<T> {
       if (this.isCached) return this.#value;
       this.#value = undefined;
     }
+    this.#exp = Infinity;
     const p = (this.#value = this.fn());
     return p
       .catch(() => ERR)
@@ -57,6 +58,7 @@ export class CachedValue<T> {
       });
   }
   force() {
+    // warning: this breaks the invariant that only 1 instance of fn() runs
     this.clear();
     return this.get();
   }
