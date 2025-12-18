@@ -31,21 +31,26 @@ export class CachedValue<T> {
     public cacheMs = 60000,
     public errorMs = 250
   ) {}
-  clear() {
-    // warning: this potentially breaks the invariant that only 1 instance of generator() runs
-    // early terminate the generator if observer.replaced
+  #terminate() {
+    // warning: set(), clear(), force() potentially breaks the invariant
+    // that only 1 instance of generator() runs simultaneously
+    // suggestion: early terminate the generator if observer.replaced
     if (this.isPending) {
       this.#observer.replaced = true; // invalidate old observer
       this.#observer = { replaced: false }; // create new observer
     }
+  }
+  clear(): void {
+    this.#terminate();
     this.#value = undefined;
     this.#exp = 0; // mark as idle
   }
-  set(value: T) {
+  set(value: T): void {
+    this.#terminate();
     this.#value = Promise.resolve(value);
-    this.#exp = clock() + this.cacheMs;
+    this.#exp = clock() + this.cacheMs; // set expiry
   }
-  get value() {
+  get value(): Promise<T> | undefined {
     return this.#value;
   }
   get isPending(): boolean {
@@ -64,8 +69,8 @@ export class CachedValue<T> {
         return Math.max(0, clock() - exp); // cached/expired
     }
   }
-  async get() {
-    if (this.isPending || this.isCached) return this.#value;
+  async get(): Promise<T> {
+    if (this.isPending || this.isCached) return this.#value!;
     this.#exp = 0; // mark as cleared
     const p = (this.#value = this.generator(this.#observer));
     this.#exp = Infinity; // mark as pending
@@ -79,7 +84,7 @@ export class CachedValue<T> {
         return p;
       });
   }
-  force() {
+  force(): Promise<T> {
     this.clear();
     return this.get();
   }
