@@ -17,16 +17,29 @@ function clock() {
   return performance.now();
 }
 
+type CachedValueObserver = { replaced: boolean };
+type CachedValueGenerator<T> = (
+  observer: Readonly<CachedValueObserver>
+) => Promise<T>;
+
 export class CachedValue<T> {
   #exp: number = 0;
   #value: Promise<T> | undefined;
-  errorMs = 250;
+  #observer: CachedValueObserver = { replaced: false };
   constructor(
-    readonly fn: () => Promise<T>,
-    public cacheMs = 60000
+    public generator: CachedValueGenerator<T>,
+    public cacheMs = 60000,
+    public errorMs = 250
   ) {}
   clear() {
+    // warning: this potentially breaks the invariant that only 1 instance of generator() runs
+    // early terminate the generator if observer.replaced
+    if (this.isPending) {
+      this.#observer.replaced = true; // invalidate old observer
+      this.#observer = { replaced: false }; // create new observer
+    }
     this.#value = undefined;
+    this.#exp = 0; // mark as idle
   }
   set(value: T) {
     this.#value = Promise.resolve(value);
@@ -35,21 +48,31 @@ export class CachedValue<T> {
   get value() {
     return this.#value;
   }
-  get isCached() {
-    return this.#exp > clock();
+  get isPending(): boolean {
+    return this.#exp === Infinity;
   }
-  get cachedRemainingMs() {
-    return Math.max(0, clock() - this.#exp);
+  get isCached(): boolean {
+    return !this.isPending && this.#exp > clock();
+  }
+  get cachedRemainingMs(): number {
+    const exp = this.#exp;
+    switch (exp) {
+      case 0: // not active
+      case Infinity: // is pending
+        return this.#exp;
+      default:
+        return Math.max(0, clock() - exp); // cached/expired
+    }
   }
   async get() {
-    if (this.#value) {
-      if (this.isCached) return this.#value;
-      this.#value = undefined;
-    }
-    const p = (this.#value = this.fn());
+    if (this.isPending || this.isCached) return this.#value;
+    this.#exp = 0; // mark as cleared
+    const p = (this.#value = this.generator(this.#observer));
+    this.#exp = Infinity; // mark as pending
     return p
       .catch(() => ERR)
       .then((x) => {
+        // only replace if we're the pending promise
         if (this.#value === p) {
           this.#exp = clock() + (x === ERR ? this.errorMs : this.cacheMs);
         }
