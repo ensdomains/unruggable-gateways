@@ -7,6 +7,22 @@ import { CachedValue, LRU } from './cached.js';
 import { AbstractProver, CallbackError } from './vm.js';
 import { toUnpaddedHex } from './utils.js';
 
+export class Fetcher {
+  constructor(readonly urls: string[]) {}
+  async fetchJson<T>(urlSuffix: string, init?: RequestInit): Promise<T> {
+    for (const url of this.urls) {
+      const res = await fetch(url + urlSuffix, init);
+      if (!res.ok) continue;
+      try {
+        return await res.json();
+      } catch {
+        // ignore
+      }
+    }
+    throw new Error('all urls failed!');
+  }
+}
+
 type SlaveCommit = {
   index: bigint;
   prover: AbstractProver;
@@ -15,7 +31,7 @@ type SlaveCommit = {
 
 export class SlaveGateway extends EZCCIP {
   readonly latestCache = new CachedValue(async () => {
-    const info = await this.fetchMaster<{
+    const info = await this.fetcher.fetchJson<{
       commits: string[];
     }>('/');
     const active = new Set(info.commits.map((x) => BigInt(x)));
@@ -35,7 +51,8 @@ export class SlaveGateway extends EZCCIP {
         (async () => {
           try {
             commit.prover = await this.commitDecoder(
-              await this.fetchMaster<object>(
+              index,
+              await this.fetcher.fetchJson<object>(
                 `/commit.json?index=${toUnpaddedHex(index)}`
               ),
               commit
@@ -59,8 +76,9 @@ export class SlaveGateway extends EZCCIP {
   readonly commits: SlaveCommit[] = [];
   readonly callLRU = new LRU<string, Uint8Array>(1000);
   constructor(
-    readonly gateways: string[],
+    readonly fetcher: Fetcher,
     readonly commitDecoder: (
+      index: bigint,
       masterObj: object,
       commitObj: object
     ) => Promise<AbstractProver>,
@@ -97,17 +115,5 @@ export class SlaveGateway extends EZCCIP {
       }
     }
     throw new Error(`too old: ${index} vs ${this.commits.map((x) => x.index)}`);
-  }
-  async fetchMaster<T>(urlSuffix: string): Promise<T> {
-    for (const url of this.gateways) {
-      const res = await fetch(url + urlSuffix);
-      if (!res.ok) continue;
-      try {
-        return await res.json();
-      } catch {
-        // ignore
-      }
-    }
-    throw new Error('all masterGateways failed!');
   }
 }

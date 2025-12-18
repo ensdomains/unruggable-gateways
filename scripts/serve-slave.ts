@@ -1,8 +1,8 @@
 import type { Serve } from 'bun';
-import type { HexAddress, HexString } from '../src/types.js';
+import type { HexAddress } from '../src/types.js';
 import { parseArgs } from 'node:util';
 import { OPFaultRollup } from '../src/op/OPFaultRollup.js';
-import { SlaveGateway } from '../src/gateway-slave.js';
+import { Fetcher, SlaveGateway } from '../src/gateway-slave.js';
 import { flattenErrors, toUnpaddedHex } from '../src/utils.js';
 import { EthProver } from '../src/eth/EthProver.js';
 import { RPCEthGetBlock, RPCEthGetProof } from '../src/eth/types.js';
@@ -20,6 +20,7 @@ import {
   toNibblePath,
   trimLeadingZeros,
 } from '../../merkle-builder/src/index.js';
+import { CachedValue } from '../src/cached.js';
 
 const args = parseArgs({
   allowPositionals: true,
@@ -32,15 +33,34 @@ const args = parseArgs({
   },
 });
 
+const fetcher = new Fetcher(['http://localhost:8050']);
+
 const port = parseInt(args.values.port);
 console.log(`Port: ${port}`);
 
 let block0 = 0;
 const NAMES: [number, string, string][] = [];
 
+const syncNames = new CachedValue(async () => {
+  const t0 = Date.now();
+  while (true) {
+    const { nextBlock, names } = await fetcher.fetchJson<{
+      nextBlock: number;
+      names: typeof NAMES;
+    }>(`/names.json?block=${block0}&limit=5000`);
+    if (!names.length) break;
+    console.log(`${block0} => ${nextBlock - 1} (${names.length})`);
+    NAMES.push(...names);
+    block0 = nextBlock;
+  }
+  console.log(`syncNames: ${NAMES.length} <${Date.now() - t0}ms>`);
+});
+
 const gateway = new SlaveGateway(
-  ['http://localhost:8050'], // args.positionals,
-  async (masterObj, commitObj) => {
+  fetcher, // args.positionals,
+  async (index, masterObj, commitObj) => {
+    console.log('Commit:', index);
+    console.time('commit');
     const { proof, block, owner, commit } = masterObj as {
       block: RPCEthGetBlock;
       proof: RPCEthGetProof;
@@ -48,15 +68,35 @@ const gateway = new SlaveGateway(
       commit: object;
     };
     Object.assign(commitObj, commit);
-    const node = await createNode(parseInt(block.number), owner);
-    function checkContext(target: any, blockTag: any) {
-      if (target !== proof.address) {
-        throw new Error(`unsupported contract: ${target}`);
-      }
-      if (blockTag !== block.number) {
-        throw new Error(`unsupported block: ${blockTag}`);
-      }
+    await syncNames.get();
+    console.time('buildTrie');
+    let node: MaybeNode = undefined;
+    const block1 = parseInt(block.number);
+    for (const [block, addr, name] of NAMES) {
+      if (block > block1) break;
+      node = insertBytes(
+        node,
+        followSlot(0n, toBytes(addr, 32)),
+        Buffer.from(name)
+      );
     }
+    if (owner) {
+      node = insertNode(
+        node,
+        toNibblePath(keccak256(toBytes(1, 32))),
+        trimLeadingZeros(toBytes(owner))
+      );
+    }
+    console.timeEnd('buildTrie');
+    console.time('hashTrie');
+    console.log({
+      index,
+      block1,
+      stateRoot: block.stateRoot,
+      storageRoot: toHex(getRootHash(node)),
+    });
+    console.timeEnd('hashTrie');
+    console.timeEnd('commit');
     return new EthProver(
       {
         async send(method, params) {
@@ -92,6 +132,14 @@ const gateway = new SlaveGateway(
       },
       block.number
     );
+    function checkContext(target: any, blockTag: any) {
+      if (target !== proof.address) {
+        throw new Error(`unsupported contract: ${target}`);
+      }
+      if (blockTag !== block.number) {
+        throw new Error(`unsupported block: ${blockTag}`);
+      }
+    }
   },
   OPFaultRollup.encodeWitness
 );
@@ -152,36 +200,3 @@ export default {
     }
   },
 } satisfies Serve;
-
-async function createNode(block1: number, owner: HexString | null) {
-  while (block0 < block1) {
-    const { nextBlock, names } = await gateway.fetchMaster<{
-      nextBlock: number;
-      names: typeof NAMES;
-    }>(`/names.json?block=${block0}&limit=10000`);
-    console.log(`${block0} => ${nextBlock - 1} (${names.length})`);
-    NAMES.push(...names);
-    block0 = nextBlock;
-  }
-  console.log(`Loaded: ${NAMES.length}`);
-  console.time('buildTrie');
-  let node: MaybeNode = undefined;
-  for (const [block, addr, name] of NAMES) {
-    if (block > block1) break;
-    node = insertBytes(node, getPrimarySlot(addr), Buffer.from(name));
-  }
-  if (owner) {
-    node = insertNode(
-      node,
-      toNibblePath(keccak256(toBytes(1, 32))),
-      trimLeadingZeros(toBytes(owner))
-    );
-  }
-  console.log(`StorageHash: ${toHex(getRootHash(node))}`);
-  console.timeEnd('buildTrie');
-  return node;
-}
-
-function getPrimarySlot(addr: string) {
-  return followSlot(0n, toBytes(addr, 32));
-}
