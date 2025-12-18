@@ -37,6 +37,9 @@ const args = parseArgs({
       short: 'd',
       default: '1',
     },
+    calls: {
+      type: 'boolean',
+    },
   },
 });
 
@@ -107,6 +110,18 @@ const gateway = new Gateway(rollup);
 gateway.commitDepth = commitDepth;
 gateway.latestCache.cacheMs = 5 * 60000;
 
+if (args.values.calls) {
+  [gateway.rollup.provider1, gateway.rollup.provider2].forEach((p) => {
+    p.on('debug', (x) => {
+      if (x.action === 'sendRpcPayload') {
+        console.log(chainName(p._network.chainId), x.action, x.payload);
+      } else if (x.action == 'receiveRpcResult') {
+        console.log(chainName(p._network.chainId), x.action, x.result);
+      }
+    });
+  });
+}
+
 const prefetch = async () => {
   try {
     const t0 = Date.now();
@@ -154,8 +169,8 @@ export default {
           const { index: _, prover, game: __, ...commit } = cache.commit;
           const [block, proof, owner] = await Promise.all([
             prover.fetchBlock(),
-            prover.fetchProofs(REGISTRAR),
-            ownable ? prover.getStorage(REGISTRAR, 1n, true) : null,
+            prover.getProofs(REGISTRAR),
+            ownable ? prover.getStorage(REGISTRAR, 1n, false) : null,
           ]);
           return Response.json({ block, proof, owner, commit }, { headers });
         } else if (url.pathname === '/names.json') {

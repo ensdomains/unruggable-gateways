@@ -1134,7 +1134,11 @@ export abstract class BlockProver extends AbstractProver {
     return BigInt(this.block);
   }
   fetchBlock(): ReturnType<typeof fetchBlock> {
-    return this.cache.get('BLOCK', () => fetchBlock(this.provider, this.block));
+    return this.cache.get(
+      'BLOCK',
+      () => fetchBlock(this.provider, this.block),
+      Infinity
+    );
   }
   override async fetchStateRoot() {
     return (await this.fetchBlock()).stateRoot;
