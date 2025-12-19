@@ -45,10 +45,10 @@ export class CachedValue<T> {
     this.#value = undefined;
     this.#exp = 0; // mark as idle
   }
-  set(value: T): void {
+  set(value: T, cacheMs = this.cacheMs): void {
     this.#terminate();
     this.#value = Promise.resolve(value);
-    this.#exp = clock() + this.cacheMs; // set expiry
+    this.#exp = clock() + cacheMs; // set expiry
   }
   get value(): Promise<T> | undefined {
     return this.#value;
@@ -60,16 +60,9 @@ export class CachedValue<T> {
     return !this.isPending && this.#exp > clock();
   }
   get cachedRemainingMs(): number {
-    const exp = this.#exp;
-    switch (exp) {
-      case 0: // not active
-      case Infinity: // is pending
-        return this.#exp;
-      default:
-        return Math.max(0, clock() - exp); // cached/expired
-    }
+    return Math.max(0, this.#exp - clock());
   }
-  async get(): Promise<T> {
+  async get(cacheMs = this.cacheMs): Promise<T> {
     if (this.isPending || this.isCached) return this.#value!;
     this.#exp = 0; // mark as cleared
     const p = (this.#value = this.generator(this.#observer));
@@ -79,7 +72,7 @@ export class CachedValue<T> {
       .then((x) => {
         // only replace if we're the pending promise
         if (this.#value === p) {
-          this.#exp = clock() + (x === ERR ? this.errorMs : this.cacheMs);
+          this.#exp = clock() + (x === ERR ? this.errorMs : cacheMs);
         }
         return p;
       });

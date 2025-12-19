@@ -150,6 +150,17 @@ describe('CachedValue', () => {
     expect(c.isCached).toBeFalse();
   });
 
+  test('cachedRemainingMs', async () => {
+    const c = new CachedValue<number>(async () => 1, 10);
+    expect(c.cachedRemainingMs).toStrictEqual(0);
+    c.get();
+    expect(c.cachedRemainingMs).toStrictEqual(Infinity);
+    await c.get();
+    expect(c.cachedRemainingMs).toBeFinite();
+    await wait(20);
+    expect(c.cachedRemainingMs).toStrictEqual(0);
+  });
+
   test('generator runs once', async () => {
     let n = 0;
     const c = new CachedValue(async () => ++n);
@@ -161,10 +172,10 @@ describe('CachedValue', () => {
     let n = 0;
     const c = new CachedValue(async () => ++n, 10);
     await Promise.all([c.get(), c.get()]);
-    expect(n, '1').toStrictEqual(1);
+    expect(n).toStrictEqual(1);
     await wait(20);
     await Promise.all([c.get(), c.get()]);
-    expect(n, '2').toStrictEqual(2);
+    expect(n).toStrictEqual(2);
   });
 
   test('reject is replayed', async () => {
@@ -179,6 +190,7 @@ describe('CachedValue', () => {
     );
     expect(c.get()).rejects.toStrictEqual(123);
     expect(c.get()).rejects.toStrictEqual(123);
+    expect(c.errorMs - c.cachedRemainingMs).toBeLessThan(5);
     expect(n).toStrictEqual(1);
     await wait(20);
     expect(c.get()).rejects.toStrictEqual(123);
@@ -187,8 +199,12 @@ describe('CachedValue', () => {
 
   test('clear() violates run-once invariant', async () => {
     let n = 0;
-    const c = new CachedValue(async () => ++n);
+    const c = new CachedValue(async () => {
+      await wait(10);
+      ++n;
+    });
     const p = c.get();
+    expect(n).toStrictEqual(0);
     c.clear();
     await Promise.all([p, c.get()]);
     expect(n).toStrictEqual(2);
@@ -220,6 +236,9 @@ describe('CachedValue', () => {
     });
     c.set(2);
     expect(await c.get()).toStrictEqual(2);
+    c.set(3, Infinity); // custom duration
+    expect(await c.get()).toStrictEqual(3);
+    expect(c.cachedRemainingMs).toStrictEqual(Infinity);
   });
 
   test('value', async () => {
