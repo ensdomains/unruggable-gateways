@@ -244,7 +244,9 @@ describe('CachedValue', () => {
   test('value', async () => {
     const c = new CachedValue(async () => 1);
     expect(await c.value).toBeUndefined();
-    await c.get();
+    const p = c.get();
+    expect(c.value).toBeDefined();
+    await p;
     expect(await c.value).toStrictEqual(1);
   });
 
