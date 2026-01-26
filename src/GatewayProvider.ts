@@ -36,6 +36,7 @@ export class GatewayProvider extends JsonRpcProvider {
     // TODO: make this a provider-specific setting?
     batchMaxCount = 10
   ) {
+    // 20251211: might be useful to modify batchStallTime
     super(fr, chain, { staticNetwork: true, batchMaxCount });
   }
   override async _send(
