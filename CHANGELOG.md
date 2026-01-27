@@ -1,3 +1,10 @@
+## [1.3.5](https://github.com/unruggable-labs/unruggable-gateways/compare/v1.3.4...v1.3.5) (2026-01-27)
+
+
+### Bug Fixes
+
+* Scroll DA comment ([810af0f](https://github.com/unruggable-labs/unruggable-gateways/commit/810af0fccdd25b210b6a2c67e0e182d6b14ff6ea))
+
 ## [1.3.4](https://github.com/unruggable-labs/unruggable-gateways/compare/v1.3.3...v1.3.4) (2026-01-27)
 
 
