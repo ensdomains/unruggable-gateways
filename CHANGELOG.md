@@ -1,3 +1,18 @@
+## [1.3.5](https://github.com/unruggable-labs/unruggable-gateways/compare/v1.3.4...v1.3.5) (2026-01-27)
+
+
+### Bug Fixes
+
+* Scroll DA comment ([810af0f](https://github.com/unruggable-labs/unruggable-gateways/commit/810af0fccdd25b210b6a2c67e0e182d6b14ff6ea))
+
+## [1.3.4](https://github.com/unruggable-labs/unruggable-gateways/compare/v1.3.3...v1.3.4) (2026-01-27)
+
+
+### Bug Fixes
+
+* resolve BigInt serialization ([572b9be](https://github.com/unruggable-labs/unruggable-gateways/commit/572b9be59171a531837eb76f00421bf2177d2765))
+* scroll DA codec update ([409ca02](https://github.com/unruggable-labs/unruggable-gateways/commit/409ca020f9ae9b87113e66f36e7ee60ea01169bf))
+
 ## [1.3.3](https://github.com/unruggable-labs/unruggable-gateways/compare/v1.3.2...v1.3.3) (2025-12-08)
 
 

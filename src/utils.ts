@@ -48,6 +48,13 @@ export function isBlockTag(x: BigNumberish): x is string {
   return typeof x === 'string' && !x.startsWith('0x');
 }
 
+// Convert block tag to a format safe for JSON serialization (bigint -> hex string)
+function toBlockTag(relBlockTag: BigNumberish): string {
+  return typeof relBlockTag === 'bigint'
+    ? toUnpaddedHex(relBlockTag)
+    : String(relBlockTag);
+}
+
 export async function fetchBlock(
   provider: RawProvider,
   relBlockTag: BigNumberish = LATEST_BLOCK_TAG
@@ -115,7 +122,7 @@ export async function fetchStorage(
   const data: HexString32 | null = await provider.send('eth_getStorageAt', [
     target,
     toPaddedHex(slot),
-    relBlockTag,
+    toBlockTag(relBlockTag),
   ]);
   if (!data) {
     throw new Error(
@@ -131,7 +138,7 @@ export async function fetchCode(
   target: HexAddress,
   relBlockTag: BigNumberish = LATEST_BLOCK_TAG
 ): Promise<HexString> {
-  return provider.send('eth_getCode', [target, relBlockTag]);
+  return provider.send('eth_getCode', [target, toBlockTag(relBlockTag)]);
 }
 
 export async function staticCall<T>(
@@ -149,7 +156,7 @@ export async function staticCall<T>(
         to,
         data: abi.encodeFunctionData(fragment, args),
       },
-      blockTag,
+      toBlockTag(blockTag),
     ]);
     const result = abi.decodeFunctionResult(fragment, answer);
     return (result.length == 1 ? result[0] : result) as T;
