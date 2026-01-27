@@ -7,6 +7,7 @@ import type {
 } from '../types.js';
 import {
   AbstractRollup,
+  type RollupWitnessEncoder,
   type RollupCommit,
   type RollupWitnessV1,
 } from '../rollup.js';
@@ -39,11 +40,11 @@ export type AbstractOPCommit = RollupCommit<EthProver> & {
   readonly passerRoot: HexString;
 };
 
-function encodeWitness<C extends AbstractOPCommit>(
-  commit: C,
-  proofSeq: ProofSequence
-) {
-  return ABI_CODER.encode(
+const witnessEncoder: RollupWitnessEncoder<AbstractOPCommit> = (
+  commit,
+  proofSeq
+) =>
+  ABI_CODER.encode(
     [`(uint256, ${OutputRootProofType}, bytes[], bytes)`],
     [
       [
@@ -54,13 +55,12 @@ function encodeWitness<C extends AbstractOPCommit>(
       ],
     ]
   );
-}
 
 export abstract class AbstractOPRollup<C extends AbstractOPCommit>
   extends AbstractRollup<C>
   implements RollupWitnessV1<C>
 {
-  static readonly encodeWitness = encodeWitness;
+  static readonly witnessEncoder = witnessEncoder;
   L2ToL1MessagePasser = '0x4200000000000000000000000000000000000016';
   async createCommit(
     index: bigint,
@@ -80,7 +80,7 @@ export abstract class AbstractOPRollup<C extends AbstractOPCommit>
     };
   }
   override encodeWitness(commit: C, proofSeq: ProofSequence) {
-    return encodeWitness(commit, proofSeq);
+    return witnessEncoder(commit, proofSeq);
   }
   encodeWitnessV1(commit: C, proofSeq: ProofSequenceV1) {
     return ABI_CODER.encode(

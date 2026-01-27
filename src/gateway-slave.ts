@@ -1,4 +1,4 @@
-import type { HexString, ProofSequence } from './types.js';
+import type { RollupWitnessEncoder } from './rollup.js';
 import { solidityPackedKeccak256 } from 'ethers/hash';
 import { getBytes } from 'ethers/utils';
 import { EZCCIP } from '@namestone/ezccip';
@@ -59,7 +59,7 @@ export class SlaveGateway extends EZCCIP {
       index: bigint,
       commitObj: object
     ) => Promise<AbstractProver>,
-    witnessEncoder: (commit: any, proofSeq: ProofSequence) => HexString
+    witnessEncoder: RollupWitnessEncoder
   ) {
     super();
     this.register(GATEWAY_ABI, {
