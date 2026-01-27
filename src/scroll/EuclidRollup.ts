@@ -217,6 +217,7 @@ function lastBlockFromBlob(blob: HexString) {
     case 7:
     case 8:
     case 9:
+    case 10:
       break;
     default:
       throw new Error(`unexpected version: ${v[0]}`);
