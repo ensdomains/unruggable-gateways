@@ -2,6 +2,7 @@ import {
   type RollupCommit,
   type RollupDeployment,
   AbstractRollup,
+  RollupWitnessEncoder,
 } from '../rollup.js';
 import type {
   HexAddress,
@@ -63,7 +64,15 @@ export type EuclidCommit = RollupCommit<EthProver> & {
   readonly l1BlockNumber: number;
 };
 
+const witnessEncoder: RollupWitnessEncoder<EuclidCommit> = (commit, proofSeq) =>
+  ABI_CODER.encode(
+    ['(uint256, bytes[], bytes)'],
+    [[commit.index, proofSeq.proofs, proofSeq.order]]
+  );
+
 export class EuclidRollup extends AbstractRollup<EuclidCommit> {
+  static readonly witnessEncoder = witnessEncoder;
+
   // https://etherscan.io/address/0xa13BAF47339d63B743e7Da8741db5456DAc1E556
   static readonly mainnetConfig: RollupDeployment<EuclidConfig> = {
     chain1: CHAINS.MAINNET,
@@ -183,10 +192,7 @@ export class EuclidRollup extends AbstractRollup<EuclidCommit> {
     commit: EuclidCommit,
     proofSeq: ProofSequence
   ): HexString {
-    return ABI_CODER.encode(
-      ['(uint256, bytes[], bytes)'],
-      [[commit.index, proofSeq.proofs, proofSeq.order]]
-    );
+    return witnessEncoder(commit, proofSeq);
   }
   override windowFromSec(sec: number): number {
     // finalization time is not on-chain
@@ -212,11 +218,13 @@ function lastBlockFromBlob(blob: HexString) {
   // https://github.com/scroll-tech/da-codec/blob/344f2d5e33e1930c63cd6a082ef77e27dbe50cea/encoding/codecv7.go#L176
   // https://github.com/scroll-tech/da-codec/blob/2cfec8c99547b68dc64e2b020fa2b83cfb9c0e99/encoding/codecv8.go
   // https://github.com/scroll-tech/da-codec/blob/54929786434f00efd00431517a332f1ec8ca58d4/encoding/codecv9.go
+  // https://github.com/scroll-tech/da-codec/blob/54929786434f00efd00431517a332f1ec8ca58d4/encoding/codecv10.go
   let v = makeBlobCanonical(blob);
   switch (v[0]) {
     case 7:
     case 8:
     case 9:
+    case 10:
       break;
     default:
       throw new Error(`unexpected version: ${v[0]}`);
