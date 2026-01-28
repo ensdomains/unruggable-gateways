@@ -49,7 +49,9 @@ describe('limits', async () => {
       .setSlot(1)
       .readBytes();
     await exec(prover, passReq);
-    expect(exec(prover, failReq)).rejects.toThrow(/^too many proofs:/);
+    expect(exec(prover, failReq)).rejects.toThrow(/^too many bytes:/);
+    // 20251212: this did throw "too many proofs" but the ordering changed
+    // provable bytes can be checked BEFORE the slots are computed
   });
 
   test('max supplied bytes', async () => {

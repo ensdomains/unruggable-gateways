@@ -2,7 +2,7 @@ import { AbiCoder, Interface } from 'ethers/abi';
 import { id as keccakStr } from 'ethers/hash';
 import { isCallException, type EthersError } from 'ethers/utils';
 import type {
-  Provider,
+  RawProvider,
   BigNumberish,
   HexString,
   HexString32,
@@ -48,8 +48,15 @@ export function isBlockTag(x: BigNumberish): x is string {
   return typeof x === 'string' && !x.startsWith('0x');
 }
 
+// Convert block tag to a format safe for JSON serialization (bigint -> hex string)
+function toBlockTag(relBlockTag: BigNumberish): string {
+  return typeof relBlockTag === 'bigint'
+    ? toUnpaddedHex(relBlockTag)
+    : String(relBlockTag);
+}
+
 export async function fetchBlock(
-  provider: Provider,
+  provider: RawProvider,
   relBlockTag: BigNumberish = LATEST_BLOCK_TAG
 ): Promise<RPCEthGetBlock> {
   if (!isBlockTag(relBlockTag)) {
@@ -66,7 +73,7 @@ export async function fetchBlock(
 }
 
 export async function fetchBlockFromHash(
-  provider: Provider,
+  provider: RawProvider,
   blockHash: HexString32
 ): Promise<RPCEthGetBlock> {
   const block: RPCEthGetBlock | null = await provider.send(
@@ -80,7 +87,7 @@ export async function fetchBlockFromHash(
 // avoid an rpc if possible
 // use negative (-100) for offset from "latest" (#-100)
 export async function fetchBlockNumber(
-  provider: Provider,
+  provider: RawProvider,
   relBlockTag: BigNumberish = LATEST_BLOCK_TAG
 ): Promise<bigint> {
   if (relBlockTag === LATEST_BLOCK_TAG) {
@@ -98,7 +105,7 @@ export async function fetchBlockNumber(
 // avoid an rpc if possible
 // convert negative (-100) => absolute (#-100)
 export async function fetchBlockTag(
-  provider: Provider,
+  provider: RawProvider,
   relBlockTag: BigNumberish = LATEST_BLOCK_TAG
 ): Promise<string | bigint> {
   return isBlockTag(relBlockTag)
@@ -107,7 +114,7 @@ export async function fetchBlockTag(
 }
 
 export async function fetchStorage(
-  provider: Provider,
+  provider: RawProvider,
   target: HexAddress,
   slot: BigNumberish,
   relBlockTag: BigNumberish = LATEST_BLOCK_TAG
@@ -115,7 +122,7 @@ export async function fetchStorage(
   const data: HexString32 | null = await provider.send('eth_getStorageAt', [
     target,
     toPaddedHex(slot),
-    relBlockTag,
+    toBlockTag(relBlockTag),
   ]);
   if (!data) {
     throw new Error(
@@ -126,8 +133,16 @@ export async function fetchStorage(
   return data.length === 66 ? data : toPaddedHex(data);
 }
 
+export async function fetchCode(
+  provider: RawProvider,
+  target: HexAddress,
+  relBlockTag: BigNumberish = LATEST_BLOCK_TAG
+): Promise<HexString> {
+  return provider.send('eth_getCode', [target, toBlockTag(relBlockTag)]);
+}
+
 export async function staticCall<T>(
-  provider: Provider,
+  provider: RawProvider,
   to: HexAddress,
   abi: Interface,
   fragment: string,
@@ -136,12 +151,13 @@ export async function staticCall<T>(
 ): Promise<T> {
   const data = abi.encodeFunctionData(fragment, args);
   try {
-    const answer = await provider.call({
-      to,
-      data,
-      enableCcipRead: true,
-      blockTag,
-    });
+    const answer: string = await provider.send('eth_call', [
+      {
+        to,
+        data: abi.encodeFunctionData(fragment, args),
+      },
+      toBlockTag(blockTag),
+    ]);
     const result = abi.decodeFunctionResult(fragment, answer);
     return (result.length == 1 ? result[0] : result) as T;
   } catch (err) {

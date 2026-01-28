@@ -1,7 +1,7 @@
 import { ZeroHash } from 'ethers/constants';
 import { HexAddress, HexString, ProofRef } from '../types.js';
 import { BlockProver, makeStorageKey, type TargetNeed } from '../vm.js';
-import { toPaddedHex } from '../utils.js';
+import { fetchCode, fetchStorage, toPaddedHex } from '../utils.js';
 import {
   type ZKEVMAccountProof,
   type ZKEVMStorageProof,
@@ -18,7 +18,7 @@ export class ZKEVMProver extends BlockProver {
     target = target.toLowerCase();
     if (this.fast) {
       return this.cache.get(target, async () => {
-        const code = await this.provider.getCode(target, this.block);
+        const code = await fetchCode(this.provider, target, this.block);
         return code.length > 2;
       });
     }
@@ -46,7 +46,7 @@ export class ZKEVMProver extends BlockProver {
     }
     if (fast) {
       return this.cache.get(storageKey, () =>
-        this.provider.getStorage(target, slot, this.block)
+        fetchStorage(this.provider, target, slot, this.block)
       );
     }
     const proofs = await this.getProofs(target, [slot]);

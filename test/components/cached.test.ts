@@ -1,5 +1,5 @@
 import { test, describe, expect } from 'bun:test';
-import { CachedMap, LRU } from '../../src/cached.js';
+import { CachedMap, CachedValue, LRU } from '../../src/cached.js';
 
 function wait(t: number) {
   return new Promise((f) => setTimeout(f, t));
@@ -131,5 +131,129 @@ describe('CachedMap', () => {
     expect(c.cachedValue('B')).resolves.toBe(2);
     await wait(110);
     expect(c.cachedSize).toBe(0);
+  });
+});
+
+describe('CachedValue', () => {
+  test('states', async () => {
+    const c = new CachedValue(() => wait(50));
+    expect(c.isPending).toBeFalse();
+    expect(c.isCached).toBeFalse();
+    const p = c.get();
+    expect(c.isPending).toBeTrue();
+    expect(c.isCached).toBeFalse();
+    await p;
+    expect(c.isPending).toBeFalse();
+    expect(c.isCached).toBeTrue();
+    c.clear();
+    expect(c.isPending).toBeFalse();
+    expect(c.isCached).toBeFalse();
+  });
+
+  test('cachedRemainingMs', async () => {
+    const c = new CachedValue<number>(async () => 1, 10);
+    expect(c.cachedRemainingMs).toStrictEqual(0);
+    c.get();
+    expect(c.cachedRemainingMs).toStrictEqual(Infinity);
+    await c.get();
+    expect(c.cachedRemainingMs).toBeFinite();
+    await wait(20);
+    expect(c.cachedRemainingMs).toStrictEqual(0);
+  });
+
+  test('generator runs once', async () => {
+    let n = 0;
+    const c = new CachedValue(async () => ++n);
+    await Promise.all([c.get(), c.get()]);
+    expect(n).toStrictEqual(1);
+  });
+
+  test('generator reruns', async () => {
+    let n = 0;
+    const c = new CachedValue(async () => ++n, 10);
+    await Promise.all([c.get(), c.get()]);
+    expect(n).toStrictEqual(1);
+    await wait(20);
+    await Promise.all([c.get(), c.get()]);
+    expect(n).toStrictEqual(2);
+  });
+
+  test('reject is replayed', async () => {
+    let n = 0;
+    const c = new CachedValue<number>(
+      async () => {
+        ++n;
+        throw 123;
+      },
+      0,
+      10
+    );
+    expect(c.get()).rejects.toStrictEqual(123);
+    expect(c.get()).rejects.toStrictEqual(123);
+    expect(c.errorMs - c.cachedRemainingMs).toBeLessThan(5);
+    expect(n).toStrictEqual(1);
+    await wait(20);
+    expect(c.get()).rejects.toStrictEqual(123);
+    expect(n).toStrictEqual(2);
+  });
+
+  test('clear() violates run-once invariant', async () => {
+    let n = 0;
+    const c = new CachedValue(async () => {
+      await wait(10);
+      ++n;
+    });
+    const p = c.get();
+    expect(n).toStrictEqual(0);
+    c.clear();
+    await Promise.all([p, c.get()]);
+    expect(n).toStrictEqual(2);
+  });
+
+  test('force() violates run-once invariant', async () => {
+    let n = 0;
+    const c = new CachedValue(async () => ++n);
+    await Promise.all([c.force(), c.force()]);
+    expect(n).toStrictEqual(2);
+  });
+
+  test('clear() w/observer can maintain run-once invariant', async () => {
+    let n = 0;
+    const c = new CachedValue(async (obs) => {
+      await wait(10);
+      if (obs.replaced) return;
+      ++n;
+    });
+    const p = c.get();
+    c.clear();
+    await Promise.all([p, c.get()]);
+    expect(n).toStrictEqual(1);
+  });
+
+  test('set()', async () => {
+    const c = new CachedValue<number>(async () => {
+      throw 123;
+    });
+    c.set(2);
+    expect(await c.get()).toStrictEqual(2);
+    c.set(3, Infinity); // custom duration
+    expect(await c.get()).toStrictEqual(3);
+    expect(c.cachedRemainingMs).toStrictEqual(Infinity);
+  });
+
+  test('value', async () => {
+    const c = new CachedValue(async () => 1);
+    expect(await c.value).toBeUndefined();
+    const p = c.get();
+    expect(c.value).toBeDefined();
+    await p;
+    expect(await c.value).toStrictEqual(1);
+  });
+
+  test('cacheMs = 0', async () => {
+    let n = 0;
+    const c = new CachedValue(async () => ++n, 0);
+    await Promise.all([c.get(), c.get()]);
+    expect(c.isCached).toBeFalse();
   });
 });

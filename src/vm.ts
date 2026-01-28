@@ -7,10 +7,9 @@ import type {
   ProofRef,
   ProofSequence,
   ProofSequenceV1,
-  Provider,
+  RawProvider,
 } from './types.js';
 import { ZeroAddress } from 'ethers/constants';
-import { Contract } from 'ethers/contract';
 import { Interface } from 'ethers/abi';
 import { keccak256 } from 'ethers/crypto';
 import { solidityPackedKeccak256 } from 'ethers/hash';
@@ -29,6 +28,7 @@ import {
   toUnpaddedHex,
   toPaddedHex,
   LATEST_BLOCK_TAG,
+  staticCall,
 } from './utils.js';
 import { CachedMap, LRU } from './cached.js';
 import { GATEWAY_OP as OP } from './ops.js';
@@ -49,11 +49,12 @@ export class CallbackError extends Error {
   }
 }
 
-type HexFuture = Unwrappable<number, HexString>;
+type SizeFuture = Unwrappable<number, number>;
+type HexFuture = Unwrappable<SizeFuture, HexString>;
 
 async function peekSize(value: HexFuture) {
   if (value instanceof Wrapped) {
-    if (value.payload) return value.payload;
+    if (value.payload) return unwrap(value.payload);
     value = await value.get();
   }
   return (value.length - 2) >> 1;
@@ -76,7 +77,7 @@ function uint256FromHex(hex: HexString) {
 }
 function numberFromHex(hex: HexString) {
   const u = uint256FromHex(hex);
-  if (u > 0xffffff) throw new Error('numeric overflow');
+  if (u > 0x1fffffff) throw new Error('numeric overflow');
   return Number(u);
 }
 function addressFromHex(hex: HexString) {
@@ -92,6 +93,14 @@ function addressFromHex(hex: HexString) {
 }
 function bigintRange(start: bigint, length: number) {
   return Array.from({ length }, (_, i) => start + BigInt(i));
+}
+function solidityArraySlotCount(length: number, step: number) {
+  if (step < 32) {
+    const per = (32 / step) | 0;
+    return ((length + per - 1) / per) | 0;
+  } else {
+    return length * ((step + 31) >> 5);
+  }
 }
 export function solidityArraySlots(slot: BigNumberish, length: number) {
   return length
@@ -402,6 +411,7 @@ export class GatewayRequest extends GatewayProgram {
   }
 }
 
+type PendingSlotsNeed = bigint[];
 export type TargetNeed = { target: HexAddress; required: boolean };
 export type HashedNeed = {
   hash: HexFuture;
@@ -438,7 +448,8 @@ export class GatewayTrace {
       prover.requireTargetBeforeSlot
     );
   }
-  readonly needs: Need[] = [];
+  readonly needs: (Need | PendingSlotsNeed)[] = [];
+  readonly futures: SizeFuture[] = [];
   readonly targets = new Map<HexString, TargetNeed>();
   proofBudget: number;
   allocBudget: number;
@@ -515,7 +526,7 @@ export class GatewayVM {
     this.outputs = Array.isArray(outputs) ? outputs : Array(outputs).fill('0x');
   }
   get needs() {
-    return this.trace.needs;
+    return this.trace.needs.flat();
   }
   checkOutputIndex(i: number) {
     if (i >= this.outputs.length) {
@@ -607,7 +618,7 @@ export abstract class AbstractProver {
   // console.log OP_DEBUG statements
   printDebug = true;
 
-  constructor(readonly provider: Provider) {}
+  constructor(readonly provider: RawProvider) {}
 
   abstract get context(): Record<string, any>;
 
@@ -686,6 +697,8 @@ export abstract class AbstractProver {
       GatewayTrace.from(this)
     );
     await this.eval(reader, vm, 0);
+    await Promise.all(vm.trace.futures.map(unwrap)); // expand all sizes
+    // vm.trace.sizes.length = 0;
     return vm;
   }
   private async eval(
@@ -792,13 +805,28 @@ export abstract class AbstractProver {
         }
         case OP.READ_BYTES: {
           const { target, slot } = vm;
-          const { value, slots } = await this.getStorageBytes(
-            target,
-            slot,
-            vm.trace.remainingProvableBytes
+          vm.trace.addSlots(target, [slot]);
+          const slots: PendingSlotsNeed = [];
+          vm.trace.needs.push(slots);
+          let value: HexFuture;
+          const future = new Wrapped(32, async () => {
+            const res = await this.getStorageBytes(
+              target,
+              slot,
+              vm.trace.remainingProvableBytes
+            );
+            value = res.value;
+            slots.push(...res.slots); // inject
+            vm.trace.consumeProofs(slots.length);
+            return res.size;
+          });
+          vm.trace.futures.push(future);
+          vm.push(
+            new Wrapped(future, async () => {
+              await unwrap(future);
+              return unwrap(value);
+            })
           );
-          vm.trace.addSlots(target, [slot, ...slots]);
-          vm.push(value);
           continue;
         }
         case OP.READ_HASHED_BYTES: {
@@ -813,26 +841,32 @@ export abstract class AbstractProver {
           const step = await vm.popNumber();
           if (!step) throw new Error('invalid element size');
           const { target, slot } = vm;
-          let length = checkSize(
-            uint256FromHex(await this.getStorage(target, slot)),
-            vm.trace.remainingProvableBytes
-          );
-          if (step < 32) {
-            const per = (32 / step) | 0;
-            length = ((length + per - 1) / per) | 0;
-          } else {
-            length = length * ((step + 31) >> 5);
-          }
-          const size = checkSize(length << 5, vm.trace.remainingProvableBytes);
-          const slots = solidityArraySlots(slot, length);
-          slots.unshift(slot);
-          vm.trace.addSlots(target, slots);
+          vm.trace.addSlots(target, [slot]);
+          const slots: PendingSlotsNeed = [];
+          vm.trace.needs.push(slots);
+          const future = new Wrapped(32, async () => {
+            const slotCount = solidityArraySlotCount(
+              numberFromHex(await this.getStorage(target, slot)),
+              step
+            );
+            const size = checkSize(
+              slotCount << 5,
+              vm.trace.remainingProvableBytes
+            );
+            slots.push(...solidityArraySlots(slot, slotCount));
+            vm.trace.consumeProofs(slotCount);
+            return size;
+          });
+          vm.trace.futures.push(future);
           vm.push(
-            new Wrapped(size, async () =>
-              concat(
-                await Promise.all(slots.map((x) => this.getStorage(target, x)))
-              )
-            )
+            new Wrapped(future, async () => {
+              await unwrap(future);
+              return concat(
+                await Promise.all(
+                  [slot, ...slots].map((x) => this.getStorage(target, x))
+                )
+              );
+            })
           );
           continue;
         }
@@ -1017,8 +1051,13 @@ export abstract class AbstractProver {
       const can = this.readBytesAtSupported.get(target);
       if (can !== false) {
         try {
-          const contract = new Contract(target, GATEWAY_EXT_ABI, this.provider);
-          const v = await contract.readBytesAt(slot);
+          const v = await staticCall<HexString>(
+            this.provider,
+            target,
+            GATEWAY_EXT_ABI,
+            'readBytesAt',
+            [slot]
+          );
           if (!can) this.readBytesAtSupported.set(target, true);
           return v;
         } catch (err) {
@@ -1026,21 +1065,25 @@ export abstract class AbstractProver {
             this.readBytesAtSupported.set(target, false);
         }
       }
-      const { value } = await this.getStorageBytes(target, slot);
+      const { value } = await this.getStorageBytes(
+        target,
+        slot,
+        this.maxSuppliedBytes
+      );
       return unwrap(value);
     });
   }
   async getStorageBytes(
     target: HexAddress,
     slot: bigint,
-    limit?: number
+    limit: number,
+    fast?: boolean
   ): Promise<{
     value: HexFuture;
     size: number;
     slots: bigint[]; // note: does not include header slot!
   }> {
     // https://docs.soliditylang.org/en/latest/internals/layout_in_storage.html#bytes-and-string
-    const fast = !limit;
     const first = await this.getStorage(target, slot, fast);
     let size = parseInt(first.slice(64), 16); // last byte
     if ((size & 1) == 0) {
@@ -1049,7 +1092,7 @@ export abstract class AbstractProver {
       const value = dataSlice(first, 0, size); // will throw if size is invalid
       return { value, size, slots: [] };
     }
-    size = checkSize(BigInt(first) >> 1n, fast ? this.maxSuppliedBytes : limit);
+    size = checkSize(BigInt(first) >> 1n, limit);
     if (size < 32) {
       throw new Error(`invalid storage encoding: ${target} @ ${slot}`);
     }
@@ -1065,7 +1108,7 @@ export abstract class AbstractProver {
 }
 
 export interface LatestProverFactory<P extends AbstractProver> {
-  latest(provider: Provider, relative?: BigNumberish): Promise<P>;
+  latest(provider: RawProvider, relative?: BigNumberish): Promise<P>;
 }
 
 export abstract class BlockProver extends AbstractProver {
@@ -1073,14 +1116,14 @@ export abstract class BlockProver extends AbstractProver {
     this: new (...a: ConstructorParameters<typeof BlockProver>) => P
   ) {
     return async (
-      provider: Provider,
+      provider: RawProvider,
       relBlockTag: BigNumberish = LATEST_BLOCK_TAG
     ) => {
       return new this(provider, await fetchBlockNumber(provider, relBlockTag));
     };
   }
   readonly block: HexString;
-  constructor(provider: Provider, block: BigNumberish) {
+  constructor(provider: RawProvider, block: BigNumberish) {
     super(provider);
     this.block = toUnpaddedHex(block);
   }

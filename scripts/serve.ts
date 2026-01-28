@@ -4,6 +4,7 @@ import {
   type RollupDeployment,
   type RollupCommitType,
   supportsV1,
+  isRollupDeployment,
 } from '../src/rollup.js';
 import {
   createProviderPair,
@@ -596,7 +597,5 @@ function concealKeys(s: string) {
 
 // hacky
 function deployments<C>(rollupClass: object): RollupDeployment<C>[] {
-  return Object.values(rollupClass).filter(
-    (x) => x && typeof x === 'object' && 'chain1' in x && 'chain2' in x
-  );
+  return Object.values(rollupClass).filter(isRollupDeployment<C>);
 }
